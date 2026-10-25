@@ -1,0 +1,1443 @@
+--[[
+    @XevrynXen  •  STEAL AN EGG
+    UI: @XevrynXen v2 shell
+    Bypass: auto-fetched from GitHub
+]]
+
+local Players           = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace         = game:GetService("Workspace")
+local RunService        = game:GetService("RunService")
+local TweenService      = game:GetService("TweenService")
+local UIS               = game:GetService("UserInputService")
+local Lighting          = game:GetService("Lighting")
+local SoundService      = game:GetService("SoundService")
+local Debris            = game:GetService("Debris")
+local TeleportService   = game:GetService("TeleportService")
+local VirtualUser       = game:GetService("VirtualUser")
+local HttpService       = game:GetService("HttpService")
+
+local LP = Players.LocalPlayer
+local playerGui = LP:WaitForChild("PlayerGui")
+
+----------------------------------------------------------------------
+-- AUTO-LOAD BYPASS FROM GITHUB
+----------------------------------------------------------------------
+local BYPASS_URL = "https://raw.githubusercontent.com/donennge/Bypass/refs/heads/main/Bypass"
+
+task.spawn(function()
+    if _G.SAE_Bypass and _G.SAE_Bypass.loaded then
+        warn("[SAE] bypass already loaded, skipping fetch.")
+        return
+    end
+    local ok, err = pcall(function()
+        local src = game:HttpGet(BYPASS_URL)
+        local chunk = (loadstring or load)(src, "=SAE_Bypass")
+        if not chunk then error("bypass compile failed") end
+        chunk()
+    end)
+    if not ok then
+        warn("[SAE] bypass fetch failed: " .. tostring(err))
+        if _G.SAE_Notify then
+            pcall(_G.SAE_Notify, "Bypass fetch failed — check GitHub URL", Color3.fromRGB(255,72,92))
+        end
+    end
+end)
+
+if playerGui:FindFirstChild("KB_XevrynXen") then
+    playerGui.KB_XevrynXen:Destroy()
+end
+
+local LOGO = "rbxassetid://107391174248131"
+
+----------------------------------------------------------------------
+-- THEME
+----------------------------------------------------------------------
+local WHITE = Color3.new(1,1,1)
+local C = {
+    bg      = Color3.fromRGB(11,12,16),
+    panel   = Color3.fromRGB(18,19,24),
+    panel2  = Color3.fromRGB(24,25,32),
+    hover   = Color3.fromRGB(32,33,42),
+    line    = Color3.fromRGB(46,48,60),
+    accent  = Color3.fromRGB(255,72,92),
+    accentDark = Color3.fromRGB(140,28,46),
+    red     = Color3.fromRGB(235,28,48),
+    purple  = Color3.fromRGB(165,92,255),
+    blue    = Color3.fromRGB(72,145,255),
+    green   = Color3.fromRGB(72,220,145),
+    text    = Color3.fromRGB(245,245,248),
+    muted   = Color3.fromRGB(155,158,168),
+}
+
+----------------------------------------------------------------------
+-- SFX
+----------------------------------------------------------------------
+local PING   = "rbxasset://sounds/electronicpingshort.wav"
+local CLICK  = "rbxasset://sounds/clickfast.wav"
+local WHOOSH = "rbxasset://sounds/swordslash.wav"
+local BOOM   = "rbxasset://sounds/impact_explosion_03.mp3"
+
+local SFX = {
+    select = {{id=CLICK,speed=1.1,vol=0.7}},
+    hover  = {{id=CLICK,speed=1.8,vol=0.1}},
+    on     = {{id=PING,speed=1.2,vol=0.55},{id=PING,speed=1.7,vol=0.55,delay=0.09}},
+    off    = {{id=PING,speed=0.8,vol=0.55},{id=PING,speed=0.55,vol=0.55,delay=0.09}},
+    open   = {{id=WHOOSH,speed=1.3,vol=0.5},{id=PING,speed=1.5,vol=0.4,delay=0.12}},
+    close  = {{id=WHOOSH,speed=0.85,vol=0.4}},
+    whoosh = {{id=WHOOSH,speed=1.0,vol=0.7}},
+    boom   = {{id=BOOM,speed=0.9,vol=0.8}},
+}
+local function sfx(name)
+    local list = SFX[name]; if not list then return end
+    for _,s in ipairs(list) do
+        task.delay(s.delay or 0, function()
+            local snd = Instance.new("Sound")
+            snd.SoundId = s.id
+            snd.Volume = s.vol or 0.5
+            snd.PlaybackSpeed = s.speed or 1
+            snd.Parent = SoundService
+            snd:Play()
+            Debris:AddItem(snd, 3)
+        end)
+    end
+end
+
+----------------------------------------------------------------------
+-- HELPERS
+----------------------------------------------------------------------
+local function new(class, props, parent)
+    local o = Instance.new(class)
+    for k,v in pairs(props) do o[k] = v end
+    o.Parent = parent
+    return o
+end
+local function tween(o, t, props, style, dir)
+    local tw = TweenService:Create(o, TweenInfo.new(t, style or Enum.EasingStyle.Quint, dir or Enum.EasingDirection.Out), props)
+    tw:Play(); return tw
+end
+local function corner(o, r) return new("UICorner", {CornerRadius=UDim.new(0,r)}, o) end
+local function stroke(o, color, th, tr)
+    return new("UIStroke", {Color=color, Thickness=th or 1, Transparency=tr or 0,
+        ApplyStrokeMode=Enum.ApplyStrokeMode.Border}, o)
+end
+local function label(parent, props)
+    local l = Instance.new("TextLabel")
+    l.BackgroundTransparency = 1; l.BorderSizePixel = 0
+    l.Font = Enum.Font.GothamMedium; l.TextColor3 = C.text; l.TextSize = 13
+    for k,v in pairs(props) do l[k] = v end
+    l.Parent = parent
+    return l
+end
+local function accentGradient(o)
+    return new("UIGradient", {Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, C.accent),
+        ColorSequenceKeypoint.new(0.5, C.purple),
+        ColorSequenceKeypoint.new(1, C.blue),
+    })}, o)
+end
+
+local spinners = {}
+local function spin(g, speed) table.insert(spinners, {g=g, s=speed or 60}) end
+RunService.RenderStepped:Connect(function(dt)
+    for i = #spinners,1,-1 do
+        local e = spinners[i]
+        if e.g.Parent then e.g.Rotation = (e.g.Rotation + e.s*dt) % 360
+        else table.remove(spinners, i) end
+    end
+end)
+
+local function shineText(lbl, period)
+    period = period or 2.0
+    lbl.TextColor3 = WHITE
+    local g = new("UIGradient", {Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, C.red),
+        ColorSequenceKeypoint.new(0.4, C.red),
+        ColorSequenceKeypoint.new(0.5, WHITE),
+        ColorSequenceKeypoint.new(0.6, C.red),
+        ColorSequenceKeypoint.new(1, C.red),
+    }), Offset = Vector2.new(1,0)}, lbl)
+    task.spawn(function()
+        while g.Parent do
+            g.Offset = Vector2.new(1,0)
+            tween(g, period*0.65, {Offset = Vector2.new(-1,0)}, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
+            task.wait(period)
+        end
+    end)
+    return g
+end
+
+local function makeShine(parent, w, h, z)
+    local s = new("Frame", {
+        AnchorPoint = Vector2.new(0.5,0.5),
+        Position = UDim2.new(1.3,0,0.5,0),
+        Size = UDim2.new(0,w,0,h),
+        BackgroundColor3 = WHITE, BorderSizePixel = 0,
+        Rotation = 18, ZIndex = z or 3,
+    }, parent)
+    new("UIGradient", {Transparency = NumberSequence.new({
+        NumberSequenceKeypoint.new(0,1),
+        NumberSequenceKeypoint.new(0.5,0.5),
+        NumberSequenceKeypoint.new(1,1),
+    })}, s)
+    return s
+end
+
+local function makeLogo(parent, radius, props)
+    local box = new("CanvasGroup", {BackgroundColor3=C.panel, BorderSizePixel=0}, parent)
+    for k,v in pairs(props or {}) do box[k] = v end
+    corner(box, radius)
+    new("ImageLabel", {
+        Size = UDim2.new(1,0,1,0), BackgroundTransparency = 1,
+        Image = LOGO, ScaleType = Enum.ScaleType.Crop, BorderSizePixel = 0,
+    }, box)
+    return box
+end
+
+----------------------------------------------------------------------
+-- STATE / EVENTS
+----------------------------------------------------------------------
+local Flags = {}
+local Changed = Instance.new("BindableEvent")
+
+local gui = new("ScreenGui", {
+    Name = "KB_XevrynXen",
+    ResetOnSpawn = false,
+    IgnoreGuiInset = true,
+    DisplayOrder = 50,
+    ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+}, playerGui)
+
+local function baseScale()
+    local v = Workspace.CurrentCamera.ViewportSize
+    return math.clamp(math.min(v.X/800, v.Y/520), 0.55, 1)
+end
+
+----------------------------------------------------------------------
+-- NOTIFICATIONS
+----------------------------------------------------------------------
+local notifHolder = new("Frame", {
+    AnchorPoint = Vector2.new(1,1),
+    Position = UDim2.new(1,-16,1,-16),
+    Size = UDim2.new(0,260,0,320),
+    BackgroundTransparency = 1,
+}, gui)
+new("UIListLayout", {
+    VerticalAlignment = Enum.VerticalAlignment.Bottom,
+    SortOrder = Enum.SortOrder.LayoutOrder,
+    Padding = UDim.new(0,6),
+}, notifHolder)
+
+local function notify(text, color)
+    color = color or C.accent
+    local wrap = new("Frame", {Size=UDim2.new(1,0,0,40), BackgroundTransparency=1}, notifHolder)
+    local card = new("Frame", {
+        Size = UDim2.new(1,0,1,0),
+        Position = UDim2.new(0,290,0,0),
+        BackgroundColor3 = C.panel, BorderSizePixel = 0,
+    }, wrap)
+    corner(card, 8)
+    stroke(card, color, 1, 0.5)
+    local bar = new("Frame", {
+        Position = UDim2.new(0,7,0,7),
+        Size = UDim2.new(0,3,1,-14),
+        BackgroundColor3 = color, BorderSizePixel = 0,
+    }, card)
+    corner(bar, 2)
+    label(card, {
+        Text = text, Font = Enum.Font.GothamBold,
+        Position = UDim2.new(0,20,0,0), Size = UDim2.new(1,-28,1,0),
+        TextXAlignment = Enum.TextXAlignment.Left,
+    })
+    local prog = new("Frame", {
+        AnchorPoint = Vector2.new(0,1), Position = UDim2.new(0,0,1,0),
+        Size = UDim2.new(1,0,0,2), BackgroundColor3 = color, BorderSizePixel = 0,
+    }, card)
+    tween(card, 0.45, {Position = UDim2.new(0,0,0,0)}, Enum.EasingStyle.Back)
+    tween(prog, 2.2, {Size = UDim2.new(0,0,0,2)}, Enum.EasingStyle.Linear)
+    task.delay(2.2, function()
+        tween(card, 0.3, {Position = UDim2.new(0,290,0,0)}, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
+        task.delay(0.35, function() wrap:Destroy() end)
+    end)
+end
+
+_G.SAE_Notify = notify
+
+local function fire(id, value, silent)
+    Flags[id] = value
+    if not silent then Changed:Fire(id, value) end
+end
+
+----------------------------------------------------------------------
+-- CONFIG
+----------------------------------------------------------------------
+local function T(id, title, def) return {type="toggle", id=id, title=title, default=def or false} end
+local function S(id, title, min, max, def, dec)
+    return {type="slider", id=id, title=title, min=min, max=max, default=def, decimals=dec or 0}
+end
+local function D(id, title, options, def)
+    return {type="dropdown", id=id, title=title, options=options, default=def or options[1]}
+end
+local function B(id, title) return {type="button", id=id, title=title} end
+local function G(name, side, controls) return {name=name, side=side, controls=controls} end
+
+local CONFIG = {
+    {
+        name = "Farm",
+        icon = "⚔",
+        groups = {
+            G("Auto Steal", "left", {
+                T("AutoSteal", "Auto Steal"),
+                D("StealTarget", "Target", {"Closest","First"}, "Closest"),
+                S("StealDelay", "Delay (x100s)", 60, 500, 90),
+            }),
+            G("Auto Hatch", "right", {
+                T("AutoHatch", "Auto Hatch"),
+                T("AutoPlace", "Auto Place"),
+                T("AutoFuse",  "Auto Fuse"),
+                T("AutoEquip","Auto Equip Best"),
+            }),
+            G("Automation", "left", {
+                T("AntiAFK", "Anti-AFK", true),
+                T("AutoSellEggs", "Auto Sell Eggs"),
+                T("AutoSellPets", "Auto Sell Pets"),
+            }),
+            G("Session", "right", {
+                B("ServerHop", "Server Hop"),
+                B("Rejoin", "Rejoin"),
+            }),
+        },
+    },
+    {
+        name = "Visual",
+        icon = "👁",
+        groups = {
+            G("ESP — Eggs", "left", {
+                T("ESP_Eggs", "Egg ESP"),
+                T("ESP_EggsDistance", "Show Distance", true),
+            }),
+            G("ESP — Players", "right", {
+                T("ESP_Players", "Player ESP"),
+            }),
+            G("ESP — World", "left", {
+                T("ESP_Guards", "Guard ESP"),
+                T("ESP_Machines", "Machine ESP"),
+            }),
+        },
+    },
+    {
+        name = "Character",
+        icon = "⚙",
+        groups = {
+            G("Movement", "left", {
+                T("Fly", "Fly"),
+                S("FlySpeed", "Fly Speed", 20, 200, 45),
+                T("Noclip", "Noclip"),
+                T("InfiniteJump", "Infinite Jump"),
+            }),
+            G("Stats", "right", {
+                T("WalkSpeed", "Walk Speed"),
+                S("WalkSpeedValue", "Value", 16, 200, 36),
+                T("JumpPower", "Jump Power"),
+                S("JumpPowerValue", "Value", 50, 200, 50),
+            }),
+        },
+    },
+    {
+        name = "Misc",
+        icon = "♾",
+        groups = {
+            G("Overlay", "left", {
+                T("HideNotifs", "Hide Notifications"),
+            }),
+        },
+    },
+}
+
+----------------------------------------------------------------------
+-- CONTROL BUILDERS
+----------------------------------------------------------------------
+local function ripple(row, relX)
+    local r = new("Frame", {
+        AnchorPoint = Vector2.new(0.5,0.5),
+        Position = UDim2.new(relX,0,0.5,0),
+        Size = UDim2.new(0,0,0,0),
+        BackgroundColor3 = C.accent, BackgroundTransparency = 0.55,
+        BorderSizePixel = 0, ZIndex = 0,
+    }, row)
+    corner(r, 200)
+    tween(r, 0.55, {Size=UDim2.new(0,170,0,170), BackgroundTransparency=1})
+    task.delay(0.6, function() r:Destroy() end)
+end
+
+local function makeToggle(parent, ctrl, order)
+    local row = new("TextButton", {
+        Size = UDim2.new(1,0,0,34),
+        BackgroundColor3 = C.hover, BackgroundTransparency = 1,
+        AutoButtonColor = false, Text = "", ClipsDescendants = true,
+        LayoutOrder = order,
+    }, parent)
+    corner(row, 8)
+    local hbar = new("Frame", {
+        AnchorPoint = Vector2.new(0,0.5), Position = UDim2.new(0,0,0.5,0),
+        Size = UDim2.new(0,3,0,0), BackgroundColor3 = C.accent, BorderSizePixel = 0,
+    }, row)
+    local name = label(row, {
+        Text = ctrl.title, Position = UDim2.new(0,10,0,0),
+        Size = UDim2.new(1,-60,1,0),
+        TextXAlignment = Enum.TextXAlignment.Left,
+    })
+    local sw = new("Frame", {
+        AnchorPoint = Vector2.new(1,0.5), Position = UDim2.new(1,-8,0.5,0),
+        Size = UDim2.new(0,38,0,20), BackgroundColor3 = C.line, BorderSizePixel = 0,
+    }, row)
+    corner(sw, 10)
+    local swStroke = stroke(sw, C.accent, 2, 1)
+    local knob = new("Frame", {
+        AnchorPoint = Vector2.new(0,0.5), Position = UDim2.new(0,3,0.5,0),
+        Size = UDim2.new(0,14,0,14), BackgroundColor3 = C.text, BorderSizePixel = 0,
+    }, sw)
+    corner(knob, 7)
+
+    local function set(v, silent)
+        tween(sw, 0.25, {BackgroundColor3 = v and C.accent or C.line})
+        tween(swStroke, 0.25, {Transparency = v and 0.45 or 1})
+        tween(knob, 0.32, {Position = UDim2.new(0, v and 21 or 3, 0.5, 0)}, Enum.EasingStyle.Back)
+        tween(name, 0.2, {TextColor3 = v and C.text or C.muted})
+        fire(ctrl.id, v, silent)
+        if not silent then sfx(v and "on" or "off") end
+    end
+    row.MouseEnter:Connect(function()
+        tween(row, 0.15, {BackgroundTransparency = 0.45})
+        tween(hbar, 0.2, {Size = UDim2.new(0,3,0,16)})
+        sfx("hover")
+    end)
+    row.MouseLeave:Connect(function()
+        tween(row, 0.15, {BackgroundTransparency = 1})
+        tween(hbar, 0.2, {Size = UDim2.new(0,3,0,0)})
+    end)
+    row.Activated:Connect(function(input)
+        local relX = 0.85
+        if input and input.Position then
+            relX = math.clamp((input.Position.X - row.AbsolutePosition.X)/row.AbsoluteSize.X, 0, 1)
+        end
+        ripple(row, relX)
+        set(not Flags[ctrl.id])
+    end)
+    set(ctrl.default, true)
+    name.TextColor3 = ctrl.default and C.text or C.muted
+end
+
+local function makeSlider(parent, ctrl, order)
+    local row = new("Frame", {Size=UDim2.new(1,0,0,48), BackgroundTransparency=1, LayoutOrder=order}, parent)
+    label(row, {Text=ctrl.title, Position=UDim2.new(0,10,0,4), Size=UDim2.new(1,-70,0,18),
+        TextXAlignment=Enum.TextXAlignment.Left})
+    local valueLabel = label(row, {
+        Text="", Font=Enum.Font.GothamBold, TextColor3=C.accent,
+        AnchorPoint=Vector2.new(1,0), Position=UDim2.new(1,-8,0,4),
+        Size=UDim2.new(0,60,0,18), TextXAlignment=Enum.TextXAlignment.Right,
+    })
+    local hit = new("TextButton", {
+        Position=UDim2.new(0,10,0,26), Size=UDim2.new(1,-20,0,18),
+        BackgroundTransparency=1, Text="", AutoButtonColor=false,
+    }, row)
+    local bar = new("Frame", {
+        AnchorPoint=Vector2.new(0,0.5), Position=UDim2.new(0,0,0.5,0),
+        Size=UDim2.new(1,0,0,6), BackgroundColor3=C.line, BorderSizePixel=0,
+    }, hit)
+    corner(bar, 3)
+    local fill = new("Frame", {Size=UDim2.new(0,0,1,0), BackgroundColor3=WHITE, BorderSizePixel=0}, bar)
+    corner(fill, 3); accentGradient(fill)
+    local knob = new("Frame", {
+        AnchorPoint=Vector2.new(0.5,0.5), Size=UDim2.new(0,14,0,14),
+        BackgroundColor3=C.text, BorderSizePixel=0,
+    }, bar)
+    corner(knob, 7)
+    local knobStroke = stroke(knob, C.accent, 2, 1)
+
+    local min, max = ctrl.min, ctrl.max
+    local mult = 10 ^ ctrl.decimals
+    local function setValue(v, silent)
+        v = math.floor(math.clamp(v, min, max)*mult + 0.5)/mult
+        local a = (v-min)/(max-min)
+        tween(fill, 0.08, {Size = UDim2.new(a,0,1,0)}, Enum.EasingStyle.Linear)
+        tween(knob, 0.08, {Position = UDim2.new(a,0,0.5,0)}, Enum.EasingStyle.Linear)
+        valueLabel.Text = tostring(v)
+        fire(ctrl.id, v, silent)
+    end
+    local function fromX(x)
+        local a = math.clamp((x - bar.AbsolutePosition.X)/bar.AbsoluteSize.X, 0, 1)
+        setValue(min + (max-min)*a)
+    end
+    local dragging = false
+    hit.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            sfx("select")
+            tween(knob, 0.18, {Size = UDim2.new(0,19,0,19)}, Enum.EasingStyle.Back)
+            tween(knobStroke, 0.18, {Transparency = 0.3})
+            fromX(i.Position.X)
+            i.Changed:Connect(function()
+                if i.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                    tween(knob, 0.18, {Size = UDim2.new(0,14,0,14)})
+                    tween(knobStroke, 0.18, {Transparency = 1})
+                end
+            end)
+        end
+    end)
+    UIS.InputChanged:Connect(function(i)
+        if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+            fromX(i.Position.X)
+        end
+    end)
+    setValue(ctrl.default, true)
+end
+
+local function makeDropdown(parent, ctrl, order)
+    local closedH = 34
+    local openH = closedH + 6 + #ctrl.options*26
+    local box = new("Frame", {
+        Size = UDim2.new(1,0,0,closedH),
+        BackgroundColor3 = C.hover, BackgroundTransparency = 0.5,
+        BorderSizePixel = 0, ClipsDescendants = true, LayoutOrder = order,
+    }, parent)
+    corner(box, 8)
+    local head = new("TextButton", {Size=UDim2.new(1,0,0,closedH), BackgroundTransparency=1, Text="", AutoButtonColor=false}, box)
+    label(head, {Text=ctrl.title, Position=UDim2.new(0,10,0,0), Size=UDim2.new(0.5,-8,1,0),
+        TextXAlignment=Enum.TextXAlignment.Left})
+    local current = label(head, {
+        Text="", Font=Enum.Font.GothamBold, TextColor3=C.accent,
+        Position=UDim2.new(0.5,0,0,0), Size=UDim2.new(0.5,-26,1,0),
+        TextXAlignment=Enum.TextXAlignment.Right,
+    })
+    local arrow = label(head, {Text="▾", TextColor3=C.muted, AnchorPoint=Vector2.new(1,0),
+        Position=UDim2.new(1,-8,0,0), Size=UDim2.new(0,14,1,0)})
+
+    local open = false
+    local buttons = {}
+    local function choose(v, silent)
+        current.Text = v
+        for opt,b in pairs(buttons) do
+            tween(b, 0.15, {TextColor3 = opt == v and C.accent or C.muted})
+        end
+        fire(ctrl.id, v, silent)
+    end
+    for i,opt in ipairs(ctrl.options) do
+        local b = new("TextButton", {
+            Position = UDim2.new(0,6,0,closedH+4+(i-1)*26),
+            Size = UDim2.new(1,-12,0,24),
+            BackgroundColor3 = C.panel, AutoButtonColor = false,
+            Text = opt, Font = Enum.Font.GothamMedium, TextSize = 12,
+            TextColor3 = C.muted, BorderSizePixel = 0,
+        }, box)
+        corner(b, 6)
+        buttons[opt] = b
+        b.Activated:Connect(function()
+            sfx("select")
+            choose(opt)
+            open = false
+            tween(box, 0.3, {Size = UDim2.new(1,0,0,closedH)})
+            tween(arrow, 0.3, {Rotation = 0})
+        end)
+    end
+    head.Activated:Connect(function()
+        sfx("select")
+        open = not open
+        tween(box, 0.38, {Size = UDim2.new(1,0,0, open and openH or closedH)}, Enum.EasingStyle.Quint)
+        tween(arrow, 0.3, {Rotation = open and 180 or 0})
+    end)
+    choose(ctrl.default, true)
+end
+
+local function makeButton(parent, ctrl, order)
+    local b = new("TextButton", {
+        Size = UDim2.new(1,0,0,34),
+        BackgroundColor3 = C.panel2, AutoButtonColor = false,
+        Text = ctrl.title, Font = Enum.Font.GothamBold,
+        TextColor3 = C.text, TextSize = 13, BorderSizePixel = 0,
+        LayoutOrder = order,
+    }, parent)
+    corner(b, 8)
+    stroke(b, C.line, 1, 0.5)
+    b.MouseEnter:Connect(function()
+        tween(b, 0.15, {BackgroundColor3 = C.hover})
+        sfx("hover")
+    end)
+    b.MouseLeave:Connect(function()
+        tween(b, 0.15, {BackgroundColor3 = C.panel2})
+    end)
+    b.Activated:Connect(function()
+        sfx("select")
+        fire(ctrl.id, true)
+    end)
+end
+
+local builders = { toggle=makeToggle, slider=makeSlider, dropdown=makeDropdown, button=makeButton }
+
+----------------------------------------------------------------------
+-- DRAGGABLE
+----------------------------------------------------------------------
+local function makeDraggable(handle, target, opts)
+    opts = opts or {}
+    local drag = {active=false}
+    local goal, cur = Vector2.zero, Vector2.zero
+    local startPos, startAbs
+
+    handle.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+            drag.active = true
+            drag.input = i
+            drag.start = i.Position
+            drag.moved = 0
+            startPos = target.Position
+            startAbs = target.AbsolutePosition
+            goal, cur = Vector2.zero, Vector2.zero
+            i.Changed:Connect(function()
+                if i.UserInputState == Enum.UserInputState.End then
+                    drag.active = false
+                    if opts.onTap and drag.moved < 8 then opts.onTap() end
+                end
+            end)
+        end
+    end)
+
+    UIS.InputChanged:Connect(function(i)
+        if not drag.active then return end
+        local isMine = i == drag.input
+            or (i.UserInputType == Enum.UserInputType.MouseMovement and drag.input.UserInputType == Enum.UserInputType.MouseButton1)
+        if not isMine then return end
+        local d = Vector2.new(i.Position.X - drag.start.X, i.Position.Y - drag.start.Y)
+        drag.moved = math.max(drag.moved, d.Magnitude)
+        local vp, sz = gui.AbsoluteSize, target.AbsoluteSize
+        local minX, maxX, minY, maxY
+        if opts.full then
+            minX, maxX = 6 - startAbs.X, vp.X - sz.X - 6 - startAbs.X
+            minY, maxY = 6 - startAbs.Y, vp.Y - sz.Y - 6 - startAbs.Y
+        else
+            minX, maxX = 140 - startAbs.X - sz.X, vp.X - 140 - startAbs.X
+            minY, maxY = -startAbs.Y, vp.Y - 56 - startAbs.Y
+        end
+        goal = Vector2.new(math.clamp(d.X, minX, maxX), math.clamp(d.Y, minY, maxY))
+    end)
+
+    RunService.RenderStepped:Connect(function(dt)
+        if not startPos or (not drag.active and (cur - goal).Magnitude < 0.05) then return end
+        cur = cur:Lerp(goal, 1 - math.exp(-dt*26))
+        target.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + cur.X,
+                                    startPos.Y.Scale, startPos.Y.Offset + cur.Y)
+    end)
+end
+
+----------------------------------------------------------------------
+-- WINDOW
+----------------------------------------------------------------------
+local win = new("CanvasGroup", {
+    Name = "Window",
+    AnchorPoint = Vector2.new(0.5,0.5),
+    Position = UDim2.new(0.5,0,0.5,0),
+    Size = UDim2.new(0,720,0,450),
+    BackgroundColor3 = C.bg, BorderSizePixel = 0,
+    Visible = false, GroupTransparency = 1,
+}, gui)
+corner(win, 14)
+spin(accentGradient(stroke(win, WHITE, 1.5)), 50)
+local winScale = new("UIScale", {Scale=1}, win)
+
+local top = new("Frame", {Size=UDim2.new(1,0,0,48), BackgroundColor3=C.panel, BorderSizePixel=0}, win)
+local topLine = new("Frame", {
+    AnchorPoint=Vector2.new(0,1), Position=UDim2.new(0,0,1,0),
+    Size=UDim2.new(1,0,0,1), BackgroundColor3=WHITE, BorderSizePixel=0,
+}, top)
+spin(accentGradient(topLine), 120)
+
+local uiLogo = makeLogo(top, 8, {
+    Position=UDim2.new(0,12,0,9),
+    Size=UDim2.new(0,30,0,30),
+})
+stroke(uiLogo, C.accent, 1, 0.3)
+local uiLogoShine = makeShine(uiLogo, 12, 60, 3)
+task.spawn(function()
+    while uiLogo.Parent do
+        uiLogoShine.Position = UDim2.new(1.3,0,0.5,0)
+        tween(uiLogoShine, 0.7, {Position=UDim2.new(-0.3,0,0.5,0)}, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
+        task.wait(3)
+    end
+end)
+
+local pill = new("Frame", {
+    AnchorPoint=Vector2.new(0,0.5), Position=UDim2.new(0,52,0.5,0),
+    Size=UDim2.new(0,88,0,20), BackgroundColor3=C.panel2, BorderSizePixel=0,
+}, top)
+corner(pill, 10)
+stroke(pill, C.line, 1)
+label(pill, {Text="STEAL AN EGG", Font=Enum.Font.GothamBold, TextSize=10, TextColor3=C.muted,
+    Size=UDim2.new(1,0,1,0)})
+local live = new("Frame", {
+    AnchorPoint=Vector2.new(0,0.5), Position=UDim2.new(0,148,0.5,0),
+    Size=UDim2.new(0,8,0,8), BackgroundColor3=C.green, BorderSizePixel=0,
+}, top)
+corner(live, 4)
+task.spawn(function()
+    while live.Parent do
+        tween(live, 0.9, {BackgroundTransparency = 0.7}, Enum.EasingStyle.Sine)
+        task.wait(0.9)
+        tween(live, 0.9, {BackgroundTransparency = 0}, Enum.EasingStyle.Sine)
+        task.wait(0.9)
+    end
+end)
+
+local title = label(top, {
+    Text="@XevrynXen", Font=Enum.Font.Michroma, TextSize=22,
+    AnchorPoint=Vector2.new(0.5,0.5), Position=UDim2.new(0.5,0,0.5,0),
+    Size=UDim2.new(0,170,1,0),
+})
+shineText(title, 2.0)
+
+local closeBtn = new("TextButton", {
+    AnchorPoint=Vector2.new(1,0.5), Position=UDim2.new(1,-12,0.5,0),
+    Size=UDim2.new(0,28,0,28), BackgroundColor3=C.panel2,
+    Text="—", Font=Enum.Font.GothamBold, TextSize=14,
+    TextColor3=C.muted, AutoButtonColor=false, BorderSizePixel=0,
+}, top)
+corner(closeBtn, 8)
+closeBtn.MouseEnter:Connect(function()
+    tween(closeBtn, 0.15, {BackgroundColor3=C.accent, TextColor3=C.text})
+end)
+closeBtn.MouseLeave:Connect(function()
+    tween(closeBtn, 0.15, {BackgroundColor3=C.panel2, TextColor3=C.muted})
+end)
+
+local sidebar = new("Frame", {
+    Position=UDim2.new(0,0,0,48), Size=UDim2.new(0,150,1,-48),
+    BackgroundColor3=C.panel, BorderSizePixel=0,
+}, win)
+new("UIListLayout", {SortOrder=Enum.SortOrder.LayoutOrder, Padding=UDim.new(0,4)}, sidebar)
+new("UIPadding", {PaddingTop=UDim.new(0,10), PaddingLeft=UDim.new(0,10), PaddingRight=UDim.new(0,10)}, sidebar)
+label(win, {
+    Text="RightShift  •  hide", TextSize=10, TextColor3=C.muted,
+    AnchorPoint=Vector2.new(0,1), Position=UDim2.new(0,0,1,-8),
+    Size=UDim2.new(0,150,0,14),
+})
+
+local content = new("Frame", {
+    Position=UDim2.new(0,158,0,56), Size=UDim2.new(1,-166,1,-64),
+    BackgroundTransparency=1,
+}, win)
+
+local sweep = new("Frame", {
+    Position=UDim2.new(1,0,0,0), Size=UDim2.new(0,160,1,0),
+    BackgroundColor3=WHITE, BorderSizePixel=0, ZIndex=30, Visible=false,
+}, win)
+new("UIGradient", {Transparency = NumberSequence.new({
+    NumberSequenceKeypoint.new(0,1),
+    NumberSequenceKeypoint.new(0.5,0.82),
+    NumberSequenceKeypoint.new(1,1),
+})}, sweep)
+
+----------------------------------------------------------------------
+-- TABS
+----------------------------------------------------------------------
+local tabs, current = {}, nil
+
+local function selectTab(t, silent)
+    if current == t then return end
+    if not silent then sfx("select") end
+    if current then
+        current.page.Visible = false
+        current.shineId += 1
+        current.shine.Visible = false
+        tween(current.btn, 0.25, {BackgroundTransparency=1, BackgroundColor3=C.hover})
+        tween(current.bar, 0.2, {Size=UDim2.new(0,3,0,0)})
+        tween(current.txt, 0.2, {TextColor3=C.muted})
+        tween(current.stroke, 0.25, {Transparency=1})
+    end
+    current = t
+    tween(t.btn, 0.3, {BackgroundTransparency=0.1, BackgroundColor3=C.accentDark})
+    tween(t.bar, 0.4, {Size=UDim2.new(0,3,0,20)}, Enum.EasingStyle.Back)
+    tween(t.txt, 0.2, {TextColor3=WHITE})
+    tween(t.stroke, 0.3, {Transparency=0.3})
+
+    t.page.Position = UDim2.new(0,0,0,18)
+    t.page.Visible = true
+    tween(t.page, 0.5, {Position=UDim2.new(0,0,0,0)})
+    for i,card in ipairs(t.cards) do
+        card.GroupTransparency = 1
+        task.delay((i-1)*0.07, function()
+            tween(card, 0.5, {GroupTransparency=0})
+        end)
+    end
+
+    t.shineId += 1
+    local id = t.shineId
+    t.shine.Visible = true
+    task.spawn(function()
+        while current == t and t.shineId == id do
+            t.shine.Position = UDim2.new(1.3,0,0.5,0)
+            tween(t.shine, 0.9, {Position=UDim2.new(-0.3,0,0.5,0)}, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
+            task.wait(2.1)
+        end
+    end)
+end
+
+for i, tab in ipairs(CONFIG) do
+    local btn = new("TextButton", {
+        Size=UDim2.new(1,0,0,38), BackgroundColor3=C.hover,
+        BackgroundTransparency=1, AutoButtonColor=false, Text="",
+        ClipsDescendants=true, LayoutOrder=i,
+    }, sidebar)
+    corner(btn, 8)
+    local btnStroke = stroke(btn, C.accent, 1.5, 1)
+    local bar = new("Frame", {
+        AnchorPoint=Vector2.new(0,0.5), Position=UDim2.new(0,0,0.5,0),
+        Size=UDim2.new(0,3,0,0), BackgroundColor3=WHITE, BorderSizePixel=0,
+    }, btn)
+    corner(bar, 2)
+    label(btn, {Text=tab.icon, TextSize=16, Position=UDim2.new(0,12,0,0), Size=UDim2.new(0,22,1,0)})
+    local txt = label(btn, {
+        Text=tab.name, Font=Enum.Font.GothamBold, TextColor3=C.muted,
+        Position=UDim2.new(0,42,0,0), Size=UDim2.new(1,-46,1,0),
+        TextXAlignment=Enum.TextXAlignment.Left,
+    })
+    local shine = makeShine(btn, 40, 90, 3)
+    shine.Visible = false
+
+    local page = new("Frame", {Size=UDim2.new(1,0,1,0), BackgroundTransparency=1, Visible=false}, content)
+    local scroll = new("ScrollingFrame", {
+        Size=UDim2.new(1,0,1,0), BackgroundTransparency=1, BorderSizePixel=0,
+        ScrollBarThickness=3, ScrollBarImageColor3=C.accent,
+        CanvasSize=UDim2.new(), AutomaticCanvasSize=Enum.AutomaticSize.Y,
+    }, page)
+    local cols = {}
+    for _,side in ipairs({"left","right"}) do
+        local col = new("Frame", {
+            Position = side == "left" and UDim2.new(0,0,0,0) or UDim2.new(0.5,6,0,0),
+            Size = UDim2.new(0.5,-10,0,0),
+            AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency=1,
+        }, scroll)
+        new("UIListLayout", {SortOrder=Enum.SortOrder.LayoutOrder, Padding=UDim.new(0,10)}, col)
+        cols[side] = col
+    end
+
+    local cards, gOrder = {}, 0
+    for _,g in ipairs(tab.groups) do
+        gOrder += 1
+        local card = new("CanvasGroup", {
+            Size=UDim2.new(1,0,0,0),
+            AutomaticSize=Enum.AutomaticSize.Y,
+            BackgroundColor3=C.panel, BorderSizePixel=0,
+            LayoutOrder=gOrder,
+        }, cols[g.side])
+        corner(card, 10)
+        stroke(card, C.line, 1, 0.3)
+        new("UIListLayout", {SortOrder=Enum.SortOrder.LayoutOrder, Padding=UDim.new(0,2)}, card)
+        new("UIPadding", {
+            PaddingTop=UDim.new(0,10), PaddingBottom=UDim.new(0,8),
+            PaddingLeft=UDim.new(0,6), PaddingRight=UDim.new(0,6),
+        }, card)
+        label(card, {
+            Text=string.upper(g.name), Font=Enum.Font.GothamBlack, TextSize=11,
+            TextColor3=C.accent, Position=UDim2.new(0,8,0,0),
+            Size=UDim2.new(1,0,0,20), TextXAlignment=Enum.TextXAlignment.Left,
+            LayoutOrder=0,
+        }, card)
+        for n,ctrl in ipairs(g.controls) do
+            builders[ctrl.type](card, ctrl, n)
+        end
+        table.insert(cards, card)
+    end
+
+    local t = {btn=btn, bar=bar, txt=txt, page=page, cards=cards, shine=shine, stroke=btnStroke, shineId=0}
+    tabs[i] = t
+    btn.Activated:Connect(function() selectTab(t) end)
+    btn.MouseEnter:Connect(function()
+        if current ~= t then
+            tween(btn, 0.15, {BackgroundTransparency=0.6})
+            sfx("hover")
+        end
+    end)
+    btn.MouseLeave:Connect(function()
+        if current ~= t then tween(btn, 0.15, {BackgroundTransparency=1}) end
+    end)
+end
+
+----------------------------------------------------------------------
+-- FAB
+----------------------------------------------------------------------
+local FAB = 58
+local fab = new("TextButton", {
+    Name="LogoButton", AnchorPoint=Vector2.new(0.5,0.5),
+    Position=UDim2.new(0,48,0.5,0),
+    Size=UDim2.new(0,0,0,0), BackgroundTransparency=1, Text="",
+    AutoButtonColor=false, Visible=false, ZIndex=5,
+}, gui)
+local fabGlow = new("Frame", {
+    AnchorPoint=Vector2.new(0.5,0.5), Position=UDim2.new(0.5,0,0.5,0),
+    Size=UDim2.new(1,18,1,18),
+    BackgroundColor3=C.accent, BackgroundTransparency=0.85, BorderSizePixel=0,
+}, fab)
+corner(fabGlow, 20)
+local fabBox = makeLogo(fab, 15, {Size=UDim2.new(1,0,1,0)})
+spin(accentGradient(stroke(fabBox, WHITE, 2)), 90)
+local fabShine = makeShine(fabBox, 14, 90, 3)
+task.spawn(function()
+    while fab.Parent do
+        tween(fabGlow, 1.2, {BackgroundTransparency=0.93, Size=UDim2.new(1,26,1,26)}, Enum.EasingStyle.Sine)
+        task.wait(1.2)
+        tween(fabGlow, 1.2, {BackgroundTransparency=0.8, Size=UDim2.new(1,14,1,14)}, Enum.EasingStyle.Sine)
+        task.wait(1.2)
+    end
+end)
+task.spawn(function()
+    while fab.Parent do
+        fabShine.Position = UDim2.new(1.3,0,0.5,0)
+        tween(fabShine, 0.8, {Position=UDim2.new(-0.3,0,0.5,0)}, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
+        task.wait(3.2)
+    end
+end)
+
+----------------------------------------------------------------------
+-- OPEN / CLOSE
+----------------------------------------------------------------------
+local opened, ready = false, false
+
+local function showFab()
+    fab.Visible = true
+    fab.Size = UDim2.new(0,0,0,0)
+    tween(fab, 0.5, {Size=UDim2.new(0,FAB,0,FAB)}, Enum.EasingStyle.Back)
+end
+local function hideFab()
+    tween(fab, 0.2, {Size=UDim2.new(0,0,0,0)}, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
+    task.delay(0.22, function() if opened then fab.Visible = false end end)
+end
+
+local function setOpen(v)
+    if opened == v then return end
+    opened = v
+    local base = baseScale()
+    if v then
+        sfx("open")
+        hideFab()
+        win.Visible = true
+        winScale.Scale = base*0.85
+        win.GroupTransparency = 1
+        tween(winScale, 0.55, {Scale=base}, Enum.EasingStyle.Back)
+        tween(win, 0.35, {GroupTransparency=0})
+        sweep.Visible = true
+        sweep.Position = UDim2.new(1,0,0,0)
+        tween(sweep, 0.9, {Position=UDim2.new(-0.25,0,0,0)}, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
+        task.delay(0.95, function() sweep.Visible = false end)
+        if current then
+            for i,card in ipairs(current.cards) do
+                card.GroupTransparency = 1
+                task.delay(0.15 + (i-1)*0.06, function()
+                    tween(card, 0.45, {GroupTransparency=0})
+                end)
+            end
+        end
+    else
+        sfx("close")
+        tween(winScale, 0.28, {Scale=base*0.88}, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
+        tween(win, 0.28, {GroupTransparency=1})
+        task.delay(0.3, function()
+            if not opened then
+                win.Visible = false
+                showFab()
+            end
+        end)
+    end
+end
+
+closeBtn.Activated:Connect(function() setOpen(false) end)
+UIS.InputBegan:Connect(function(i, gpe)
+    if not gpe and ready and i.KeyCode == Enum.KeyCode.RightShift then
+        setOpen(not opened)
+    end
+end)
+
+makeDraggable(top, win, {full=false})
+makeDraggable(fab, fab, {full=true, onTap=function() if ready then setOpen(true) end end})
+
+selectTab(tabs[1], true)
+
+----------------------------------------------------------------------
+-- INTRO
+----------------------------------------------------------------------
+task.spawn(function()
+    local rng = Random.new()
+    local blur = new("BlurEffect", {Size=0}, Lighting)
+    tween(blur, 0.8, {Size=10})
+
+    local holder = new("CanvasGroup", {
+        AnchorPoint=Vector2.new(0.5,0.5),
+        Position=UDim2.new(0.5,0,0.5,0),
+        Size=UDim2.new(0,800,0,480),
+        BackgroundTransparency=1,
+    }, gui)
+    local introScale = baseScale()
+    local hs = new("UIScale", {Scale=introScale*0.88}, holder)
+    tween(hs, 1.0, {Scale=introScale})
+
+    sfx("whoosh")
+    for i = 1, 10 do
+        task.delay(i*0.04, function()
+            local y, len = rng:NextInteger(30,450), rng:NextInteger(140,340)
+            local ln = new("Frame", {
+                Position=UDim2.new(0,830,0,y), Size=UDim2.new(0,len,0,2),
+                BackgroundColor3=(i%2==0) and WHITE or C.accent,
+                BackgroundTransparency=0.35, BorderSizePixel=0,
+            }, holder)
+            tween(ln, 0.6, {Position=UDim2.new(0,-len-30,0,y), BackgroundTransparency=1}, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+            task.delay(0.65, function() ln:Destroy() end)
+        end)
+    end
+
+    local logoBox = makeLogo(holder, 28, {
+        AnchorPoint=Vector2.new(0.5,0.5), Position=UDim2.new(0.5,0,0,130),
+        Size=UDim2.new(0,10,0,10), Rotation=-200, GroupTransparency=1,
+    })
+    spin(accentGradient(stroke(logoBox, WHITE, 3)), 100)
+    task.wait(0.35)
+    tween(logoBox, 0.75, {Size=UDim2.new(0,128,0,128), Rotation=0, GroupTransparency=0}, Enum.EasingStyle.Back)
+    task.wait(0.55)
+    sfx("boom")
+
+    local vlab = label(holder, {
+        Text="@XevrynXen", Font=Enum.Font.Michroma, TextSize=58,
+        TextTransparency=1, AnchorPoint=Vector2.new(0,0.5),
+        Position=UDim2.new(0,-400,0,268), Size=UDim2.new(0,400,0,70),
+        TextXAlignment=Enum.TextXAlignment.Left,
+    })
+    local hubPill = new("Frame", {
+        AnchorPoint=Vector2.new(0,0.5), Position=UDim2.new(0,1200,0,268),
+        Size=UDim2.new(0,150,0,46), BackgroundColor3=C.accentDark,
+        BackgroundTransparency=1, BorderSizePixel=0,
+    }, holder)
+    corner(hubPill, 10)
+    local hubStroke = stroke(hubPill, C.accent, 2, 1)
+    label(hubPill, {Text="HUB", Font=Enum.Font.Michroma, TextSize=28,
+        TextColor3=WHITE, TextTransparency=1, Size=UDim2.new(1,0,1,0)})
+    task.wait(0.15)
+    local vw = vlab.TextBounds.X
+    local hw = 120
+    local gap = 16
+    local x0 = 400 - (vw+gap+hw)/2
+    vlab.Size = UDim2.new(0,vw,0,70)
+    hubPill.Size = UDim2.new(0,hw,0,46)
+
+    sfx("whoosh")
+    tween(vlab, 0.7, {Position=UDim2.new(0,x0,0,268), TextTransparency=0}, Enum.EasingStyle.Back)
+    tween(hubPill, 0.7, {Position=UDim2.new(0,x0+vw+gap,0,268), BackgroundTransparency=0.15}, Enum.EasingStyle.Back)
+    tween(hubStroke, 0.7, {Transparency=0.2})
+    shineText(vlab, 1.8)
+
+    local line = new("Frame", {
+        AnchorPoint=Vector2.new(0.5,0.5), Position=UDim2.new(0.5,0,0,314),
+        Size=UDim2.new(0,0,0,2), BackgroundColor3=WHITE, BorderSizePixel=0,
+    }, holder)
+    spin(accentGradient(line), 120)
+    tween(line, 0.7, {Size=UDim2.new(0,420,0,2)})
+    local sub = label(holder, {
+        Text="S T E A L   A N   E G G   •   E D I T I O N",
+        Font=Enum.Font.GothamBold, TextSize=13, TextColor3=C.muted,
+        TextTransparency=1, AnchorPoint=Vector2.new(0.5,0.5),
+        Position=UDim2.new(0.5,0,0,336), Size=UDim2.new(0,420,0,20),
+    })
+    tween(sub, 0.6, {TextTransparency=0.1})
+
+    local track = new("Frame", {
+        AnchorPoint=Vector2.new(0.5,0.5), Position=UDim2.new(0.5,0,0,376),
+        Size=UDim2.new(0,280,0,4), BackgroundColor3=C.line, BorderSizePixel=0,
+    }, holder)
+    corner(track, 2)
+    local fill = new("Frame", {Size=UDim2.new(0,0,1,0), BackgroundColor3=WHITE, BorderSizePixel=0}, track)
+    corner(fill, 2); accentGradient(fill)
+    local status = label(holder, {
+        Text="", TextSize=11, TextColor3=C.muted,
+        AnchorPoint=Vector2.new(0.5,0.5), Position=UDim2.new(0.5,0,0,398),
+        Size=UDim2.new(0,280,0,16),
+    })
+    local steps = {"Loading modules...", "Syncing interface...", "Applying theme...", "Ready"}
+    for i,s in ipairs(steps) do
+        status.Text = s
+        tween(fill, 0.45, {Size=UDim2.new(i/#steps,0,1,0)}, Enum.EasingStyle.Quad)
+        task.wait(0.45)
+    end
+
+    task.wait(0.15)
+    tween(hs, 0.55, {Scale=introScale*1.3}, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
+    tween(holder, 0.5, {GroupTransparency=1}, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
+    tween(blur, 0.6, {Size=0})
+    task.wait(0.35)
+
+    ready = true
+    setOpen(true)
+    notify("@XevrynXen SAE loaded  •  RightShift", C.purple)
+    task.wait(0.4)
+    holder:Destroy()
+    blur:Destroy()
+end)
+
+----------------------------------------------------------------------
+-- STEAL AN EGG BACKEND
+----------------------------------------------------------------------
+local EggsFolder = Workspace:WaitForChild("Eggs", 20)
+local Remotes = ReplicatedStorage:WaitForChild("Remotes", 20)
+local ConfigFolder = ReplicatedStorage:FindFirstChild("Config")
+local EggConfig = (ConfigFolder and ConfigFolder:FindFirstChild("Eggs") and require(ConfigFolder.Eggs)) or {}
+
+local function findRemote(list)
+    for _,name in ipairs(list) do
+        local r = Remotes and Remotes:FindFirstChild(name)
+        if r then return r end
+    end
+    return nil
+end
+
+local StealRemote = findRemote({"StealEgg","Steal","StealEvent","RemoteEvent"})
+local HatchRemote = findRemote({"HatchEgg","Hatch","HatchEvent"})
+local PlaceRemote = findRemote({"PlaceEgg","Place","PlaceEvent"})
+local FuseRemote  = findRemote({"Fuse","FusePets"})
+local EquipRemote = findRemote({"EquipBest","EquipBestPets"})
+local SellEggsRemote = findRemote({"SellEggs","SellEgg"})
+local SellPetsRemote = findRemote({"SellPets","SellPet"})
+
+local State = {
+    AutoSteal=false, AutoHatch=false, AutoPlace=false, AutoFuse=false,
+    AutoEquip=false, AutoSellEggs=false, AutoSellPets=false,
+    AntiAFK=true, Noclip=false, Fly=false,
+    ESP_Eggs=false, ESP_Players=false, ESP_Guards=false, ESP_Machines=false,
+    StealTarget="Closest", StealDelay=0.9, FlySpeed=45,
+}
+
+local espRegistry = {}
+local flyBV, flyBG
+
+local function distTo(pos)
+    local char = LP.Character
+    if not char then return math.huge end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return math.huge end
+    return (hrp.Position - pos).Magnitude
+end
+
+local function eggStealable(m)
+    if not m or not m.Parent then return false end
+    if m:GetAttribute("Stolen") or m:GetAttribute("Owned") or m:GetAttribute("Locked") then return false end
+    return true
+end
+
+local function getEggId(model)
+    for id, cfg in pairs(EggConfig) do
+        if type(cfg) == "table" then
+            if cfg.Model == model.Name or cfg.ID == model.Name
+                or cfg.Name == model.Name or tostring(cfg.EggId) == model.Name then
+                return cfg.ID or cfg.EggId or id
+            end
+        end
+    end
+    return model.Name
+end
+
+local function closestEgg()
+    local best, bestD = nil, math.huge
+    for _,egg in ipairs(EggsFolder:GetChildren()) do
+        if egg:IsA("Model") and eggStealable(egg) then
+            local root = egg.PrimaryPart or egg:FindFirstChildWhichIsA("BasePart")
+            if root then
+                local d = distTo(root.Position)
+                if d < bestD then best, bestD = egg, d end
+            end
+        end
+    end
+    return best
+end
+
+local function firstEgg()
+    for _,egg in ipairs(EggsFolder:GetChildren()) do
+        if egg:IsA("Model") and eggStealable(egg) then return egg end
+    end
+    return nil
+end
+
+local ESPFolder = Instance.new("Folder")
+ESPFolder.Name = "KB_ESP"
+ESPFolder.Parent = game:GetService("CoreGui")
+
+local function makeESP(obj, text, color, offsetY)
+    if espRegistry[obj] then return end
+    local billboard = Instance.new("BillboardGui")
+    billboard.Name = "KB_ESP"
+    billboard.Size = UDim2.new(0,140,0,40)
+    billboard.StudsOffset = Vector3.new(0, offsetY or 3, 0)
+    billboard.AlwaysOnTop = true
+    billboard.Adornee = obj:IsA("BasePart") and obj or (obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart"))
+    billboard.Parent = ESPFolder
+
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1,0,1,0)
+    label.BackgroundTransparency = 1
+    label.TextColor3 = color
+    label.TextStrokeTransparency = 0.4
+    label.TextScaled = true
+    label.Font = Enum.Font.SourceSansBold
+    label.Text = text
+    label.Parent = billboard
+
+    espRegistry[obj] = billboard
+
+    task.spawn(function()
+        while espRegistry[obj] and billboard.Parent do
+            task.wait(0.25)
+            if Flags.ESP_EggsDistance and billboard.Adornee and billboard.Adornee.Parent then
+                label.Text = string.format("%s [%d]", text, math.floor(distTo(billboard.Adornee.Position)))
+            end
+        end
+    end)
+end
+local function clearESP(obj)
+    if espRegistry[obj] then
+        espRegistry[obj]:Destroy()
+        espRegistry[obj] = nil
+    end
+end
+
+task.spawn(function()
+    while task.wait(State.StealDelay) do
+        if not State.AutoSteal or not StealRemote then continue end
+        local target = (State.StealTarget == "Closest") and closestEgg() or firstEgg()
+        if target then
+            pcall(function() StealRemote:FireServer(getEggId(target)) end)
+        end
+    end
+end)
+
+task.spawn(function()
+    while task.wait(1) do
+        if not State.AutoPlace or not PlaceRemote then continue end
+        local plot = Workspace:FindFirstChild(LP.Name.."Plot")
+            or Workspace:FindFirstChild(LP.Name.."'s Plot")
+            or (Workspace:FindFirstChild("Plots") and Workspace.Plots:FindFirstChild(LP.Name))
+        if plot then
+            local eggs = plot:FindFirstChild("Eggs")
+            if eggs then
+                for _,e in ipairs(eggs:GetChildren()) do
+                    pcall(function() PlaceRemote:FireServer(e.Name) end)
+                    task.wait(0.1)
+                end
+            end
+        end
+    end
+end)
+
+task.spawn(function()
+    while task.wait(1) do
+        if not State.AutoHatch or not HatchRemote then continue end
+        pcall(function() HatchRemote:FireServer() end)
+    end
+end)
+
+task.spawn(function()
+    while task.wait(2) do
+        if not State.AutoFuse or not FuseRemote then continue end
+        pcall(function() FuseRemote:FireServer() end)
+    end
+end)
+
+task.spawn(function()
+    while task.wait(2) do
+        if not State.AutoEquip or not EquipRemote then continue end
+        pcall(function() EquipRemote:FireServer() end)
+    end
+end)
+
+task.spawn(function()
+    while task.wait(3) do
+        if not State.AutoSellEggs or not SellEggsRemote then continue end
+        pcall(function() SellEggsRemote:FireServer() end)
+    end
+end)
+
+task.spawn(function()
+    while task.wait(3) do
+        if not State.AutoSellPets or not SellPetsRemote then continue end
+        pcall(function() SellPetsRemote:FireServer() end)
+    end
+end)
+
+task.spawn(function()
+    while task.wait(0.4) do
+        if State.ESP_Eggs then
+            for _,egg in ipairs(EggsFolder:GetChildren()) do
+                if egg:IsA("Model") and eggStealable(egg) then
+                    makeESP(egg, egg.Name, Color3.fromRGB(255,215,0), 4)
+                end
+            end
+        else
+            for _,egg in ipairs(EggsFolder:GetChildren()) do clearESP(egg) end
+        end
+
+        for _,plr in ipairs(Players:GetPlayers()) do
+            if plr ~= LP and plr.Character then
+                local hrp = plr.Character:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    if State.ESP_Players then makeESP(hrp, plr.Name, Color3.fromRGB(0,255,120), 3)
+                    else clearESP(hrp) end
+                end
+            end
+        end
+
+        for _,m in ipairs(Workspace:GetDescendants()) do
+            local lower = m.Name:lower()
+            if lower:find("guard") and (m:IsA("Model") or m:IsA("BasePart")) then
+                if State.ESP_Guards then makeESP(m, "GUARD", Color3.fromRGB(255,60,60), 4)
+                else clearESP(m) end
+            elseif lower:find("machine") and (m:IsA("Model") or m:IsA("BasePart")) then
+                if State.ESP_Machines then makeESP(m, "MACHINE", Color3.fromRGB(120,180,255), 4)
+                else clearESP(m) end
+            end
+        end
+    end
+end)
+
+task.spawn(function()
+    while task.wait(0.1) do
+        if State.Noclip then
+            local char = LP.Character
+            if char then
+                for _,p in ipairs(char:GetDescendants()) do
+                    if p:IsA("BasePart") and p.CanCollide then p.CanCollide = false end
+                end
+            end
+        end
+    end
+end)
+
+local function startFly()
+    local char = LP.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    flyBV = Instance.new("BodyVelocity")
+    flyBV.MaxForce = Vector3.new(1e5,1e5,1e5)
+    flyBV.Velocity = Vector3.zero
+    flyBV.Parent = hrp
+    flyBG = Instance.new("BodyGyro")
+    flyBG.MaxTorque = Vector3.new(1e5,1e5,1e5)
+    flyBG.P = 1000
+    flyBG.Parent = hrp
+end
+local function stopFly()
+    if flyBV then flyBV:Destroy() flyBV = nil end
+    if flyBG then flyBG:Destroy() flyBG = nil end
+end
+RunService.RenderStepped:Connect(function()
+    if not State.Fly or not flyBV then return end
+    local char = LP.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    local cam = Workspace.CurrentCamera
+    local move = Vector3.zero
+    if UIS:IsKeyDown(Enum.KeyCode.W) then move += cam.CFrame.LookVector end
+    if UIS:IsKeyDown(Enum.KeyCode.S) then move -= cam.CFrame.LookVector end
+    if UIS:IsKeyDown(Enum.KeyCode.A) then move -= cam.CFrame.RightVector end
+    if UIS:IsKeyDown(Enum.KeyCode.D) then move += cam.CFrame.RightVector end
+    if UIS:IsKeyDown(Enum.KeyCode.Space) then move += Vector3.new(0,1,0) end
+    if UIS:IsKeyDown(Enum.KeyCode.LeftControl) then move -= Vector3.new(0,1,0) end
+    flyBV.Velocity = move * State.FlySpeed
+end)
+
+LP.Idled:Connect(function()
+    if State.AntiAFK then
+        VirtualUser:CaptureController()
+        VirtualUser:ClickButton2(Vector2.new())
+    end
+end)
+
+task.spawn(function()
+    while task.wait(0.25) do
+        local char = LP.Character
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        if hum then
+            if Flags.WalkSpeed then hum.WalkSpeed = Flags.WalkSpeedValue or 36 end
+            if Flags.JumpPower then hum.JumpPower = Flags.JumpPowerValue or 50 end
+        end
+    end
+end)
+
+UIS.JumpRequest:Connect(function()
+    if Flags.InfiniteJump and LP.Character then
+        local hum = LP.Character:FindFirstChildOfClass("Humanoid")
+        if hum then hum:ChangeState(Enum.HumanoidStateType.Jumping) end
+    end
+end)
+
+local function serverHop()
+    local ok, body = pcall(function()
+        return game:HttpGet("https://games.roblox.com/v1/games/"..game.PlaceId.."/servers/Public?sortOrder=Desc&limit=100")
+    end)
+    if ok and body then
+        local data = HttpService:JSONDecode(body)
+        for _,s in ipairs(data.data or {}) do
+            if s.id ~= game.JobId and s.playing < s.maxPlayers then
+                pcall(function() TeleportService:TeleportToPlaceInstance(game.PlaceId, s.id, LP) end)
+                return
+            end
+        end
+        notify("No suitable server", C.red)
+    else
+        notify("Server hop failed", C.red)
+    end
+end
+
+----------------------------------------------------------------------
+-- FLAG BRIDGE
+----------------------------------------------------------------------
+local HANDLERS = {
+    AutoSteal = function(v) State.AutoSteal = v; notify("Auto Steal  "..(v and "ON" or "OFF"), v and C.green or C.accent) end,
+    StealTarget = function(v) State.StealTarget = v end,
+    StealDelay = function(v) State.StealDelay = math.max(v/100, 0.05) end,
+    AutoHatch = function(v) State.AutoHatch = v; notify("Auto Hatch  "..(v and "ON" or "OFF"), v and C.green or C.accent) end,
+    AutoPlace = function(v) State.AutoPlace = v end,
+    AutoFuse = function(v) State.AutoFuse = v end,
+    AutoEquip = function(v) State.AutoEquip = v end,
+    AutoSellEggs = function(v) State.AutoSellEggs = v end,
+    AutoSellPets = function(v) State.AutoSellPets = v end,
+    AntiAFK = function(v) State.AntiAFK = v end,
+    ServerHop = function() serverHop() end,
+    Rejoin = function() TeleportService:Teleport(game.PlaceId, LP) end,
+
+    ESP_Eggs = function(v) State.ESP_Eggs = v end,
+    ESP_EggsDistance = function(v) end,
+    ESP_Players = function(v) State.ESP_Players = v end,
+    ESP_Guards = function(v) State.ESP_Guards = v end,
+    ESP_Machines = function(v) State.ESP_Machines = v end,
+
+    Fly = function(v)
+        State.Fly = v
+        if v then startFly() else stopFly() end
+        notify("Fly  "..(v and "ON" or "OFF"), v and C.green or C.accent)
+    end,
+    FlySpeed = function(v) State.FlySpeed = v end,
+    Noclip = function(v) State.Noclip = v end,
+    InfiniteJump = function(v) end,
+    WalkSpeed = function(v) end,
+    WalkSpeedValue = function(v) end,
+    JumpPower = function(v) end,
+    JumpPowerValue = function(v) end,
+}
+
+Changed.Event:Connect(function(id, value)
+    local h = HANDLERS[id]
+    if h then pcall(h, value) end
+end)
+
+task.spawn(function()
+    task.wait(1)
+    State.StealDelay = (Flags.StealDelay or 90) / 100
+    State.FlySpeed = Flags.FlySpeed or 45
+    notify("@XevrynXen SAE ready", C.purple)
+end)
+
+print("[@XevrynXen SAE] loaded.")
